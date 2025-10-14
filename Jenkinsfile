@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // Jenkins credentials ID
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
         IMAGE_NAME = "prudhvivarma96/demo-flask-app"
     }
 
@@ -16,6 +16,10 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
                     if [ -d "tests" ]; then
                         python3 -m unittest discover -s tests
                     else
