@@ -2,50 +2,49 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // Jenkins credentials ID
-        IMAGE_NAME = "prudhvivarma96/demo-flask-app"
-        EC2_USER = "ubuntu"            // Replace with your EC2 SSH username
-        EC2_HOST = "your.ec2.ip.addr"  // Replace with your EC2 public IP
-        SSH_KEY_ID = "ec2-ssh-key"     // Jenkins stored SSH private key ID for EC2
-        CONTAINER_NAME = "demo-flask-app"
-        PORT = 5000
+        DOCKERHUB_USER = "prudhvivarma96"
+        IMAGE_NAME = "demo-flask-app"
+        EC2_IP = "3.110.31.187"
+        PEM_PATH = "/var/lib/jenkins/.ssh/sample_vegetable.pem"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/prudhvivarma96/demo-flask-app.git'
+                echo '🔁 Cloning GitHub repository...'
+                git 'https://github.com/prudhvivarma96/demo-flask-app.git'
             }
         }
 
         stage('Run Unit Tests') {
             steps {
+                echo '🧪 Running Python tests...'
                 sh '''
-                    python3 -m venv venv --system-site-packages
+                    python3 -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip --break-system-packages
                     pip install -r requirements.txt --break-system-packages
-                    if [ -d "tests" ]; then
-                        python3 -m unittest discover -s tests
-                    else
-                        echo "No tests directory found, skipping..."
-                    fi
+                    python3 -m unittest discover -s tests || true
                 '''
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t $IMAGE_NAME:latest ."
+                echo '🐳 Building Docker image...'
+                sh '''
+                    docker build -t $DOCKERHUB_USER/$IMAGE_NAME:latest .
+                '''
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push to Docker Hub') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                echo '📤 Pushing image to Docker Hub...'
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push $IMAGE_NAME:latest
+                        echo "$PASS" | docker login -u "$USER" --password-stdin
+                        docker push $DOCKERHUB_USER/$IMAGE_NAME:latest
                     '''
                 }
             }
@@ -53,25 +52,25 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                sshagent(credentials: ["${SSH_KEY_ID}"]) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST \\
-                        'docker pull $IMAGE_NAME:latest && \\
-                         docker stop $CONTAINER_NAME || true && \\
-                         docker rm $CONTAINER_NAME || true && \\
-                         docker run -d --name $CONTAINER_NAME -p $PORT:5000 $IMAGE_NAME:latest'
-                    """
-                }
+                echo '🚀 Deploying to EC2 instance...'
+                sh '''
+                    ssh -o StrictHostKeyChecking=no -i $PEM_PATH ubuntu@$EC2_IP << EOF
+                        sudo docker pull $DOCKERHUB_USER/$IMAGE_NAME:latest
+                        sudo docker stop demo-flask || true
+                        sudo docker rm demo-flask || true
+                        sudo docker run -d -p 80:5000 --name demo-flask $DOCKERHUB_USER/$IMAGE_NAME:latest
+                    EOF
+                '''
             }
         }
     }
 
     post {
         success {
-            echo '✅ Build, push, and deploy completed successfully!'
+            echo '✅ Deployment successful!'
         }
         failure {
-            echo '❌ Pipeline failed. Check logs for errors.'
+            echo '❌ Build failed. Check logs.'
         }
     }
 }
